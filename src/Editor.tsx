@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { TechnicalTools } from './studio/TechnicalTools';
+import { TemplateGallery } from './studio/TemplateGallery';
+import { StudioExportDialog } from './studio/ExportDialog';
+const WritingWorkspace = lazy(() =>
+  import('./studio/WritingWorkspace').then((m) => ({ default: m.WritingWorkspace })),
+);
 import {
   ArrowLeft,
   ArrowRight,
@@ -48,7 +54,6 @@ import {
   type DesignElement,
   type Project,
 } from './model';
-import { generatePages } from './layout';
 import { loadImage, mathImage, readFile, readImage, thumbnail } from './render';
 import { saveProject } from './storage';
 import {
@@ -68,8 +73,6 @@ import { Logo, Modal, ColorField } from './ui';
 type Mode = 'design' | 'write' | 'reel';
 type Tab =
   'Templates' | 'Text' | 'Shapes' | 'Backgrounds' | 'Images' | 'Uploads' | 'Elements' | 'Brand kit';
-const sample =
-  '5 things to know about data science\n\nStart with a question. A useful analysis begins with a clear problem, not a complicated model.\n\nUnderstand your data. Explore missing values, distributions, and how the information was collected.\n\nKeep learning the basics. Statistics and thoughtful experiments are more useful than chasing every new tool.\n\nCommunicate clearly. A simple chart and a useful explanation can make an insight actionable.\n\nPractice on real problems. Build small projects, document your decisions, and share what you learn.';
 export function Editor({
   onHome,
   notice,
@@ -88,20 +91,16 @@ export function Editor({
     [mode, setMode] = useState<Mode>(initialMode),
     [exporting, setExporting] = useState(false),
     [preview, setPreview] = useState(false),
+    [focusCanvas, setFocusCanvas] = useState(false),
     [saveStatus, setSaveStatus] = useState('Saved locally'),
     [zoom, setZoom] = useState(1),
     [area, setArea] = useState({ width: 700, height: 620 }),
-    [source, setSource] = useState(p.sourceText || ''),
-    [slideCount, setSlideCount] = useState(initialMode === 'write' ? 7 : 1),
-    [templateId, setTemplateId] = useState(templates[0].id),
-    [live, setLive] = useState(false),
     [math, setMath] = useState<{ id?: string; expression: string } | null>(null),
     [templateConfirm, setTemplateConfirm] = useState<string | null>(null);
   const workspace = useRef<HTMLDivElement>(null),
     uploadRef = useRef<HTMLInputElement>(null),
     saveSequence = useRef(0),
-    mounted = useRef(true),
-    lastSource = useRef(source);
+    mounted = useRef(true);
   const selected = page.elements.find((e) => e.id === state.selected);
   const persist = useCallback(async (snapshot: Project) => {
     const seq = ++saveSequence.current;
@@ -148,10 +147,13 @@ export function Editor({
     );
     observer.observe(workspace.current);
     return () => observer.disconnect();
-  }, []);
+  }, [mode]);
   const removeSelected = useCallback(() => {
     const s = useEditor.getState();
-    if (s.selected)
+    if (
+      s.selected &&
+      !s.project?.pages[s.pageIndex].elements.find((e) => e.id === s.selected)?.locked
+    )
       s.updatePage((page) => ({
         ...page,
         elements: page.elements.filter((e) => e.id !== s.selected),
@@ -177,7 +179,7 @@ export function Editor({
         void persist(useEditor.getState().project!).catch((err) => notice(err.message));
         return;
       }
-      if (target.matches('input,textarea,select,[contenteditable="true"]')) return;
+      if (target.closest('input,textarea,select,[contenteditable="true"],.cm-editor')) return;
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         e.shiftKey ? useEditor.getState().redo() : useEditor.getState().undo();
@@ -194,7 +196,7 @@ export function Editor({
       else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
         const s = useEditor.getState(),
           el = s.project?.pages[s.pageIndex].elements.find((el) => el.id === s.selected);
-        if (el) {
+        if (el && !el.locked) {
           e.preventDefault();
           const n = e.shiftKey ? 10 : 1;
           s.patchElement(el.id, {
@@ -211,34 +213,6 @@ export function Editor({
     state.updatePage((page) => ({ ...page, elements: [...page.elements, e] }));
     state.select(e.id);
   };
-  const generate = useCallback(
-    (text: string) => {
-      try {
-        const t = templates.find((t) => t.id === templateId)!;
-        if (text.length > slideCount * 2200)
-          throw new Error(
-            'This is a lot of text for these slides. Add more slides or shorten the copy for a readable design.',
-          );
-        const pages = generatePages(text, t, p.width, p.height, slideCount);
-        state.commit((project) => ({ ...project, pages, sourceText: text }));
-        state.setPage(0);
-        setLive(true);
-      } catch (err) {
-        notice((err as Error).message);
-      }
-    },
-    [templateId, p.width, p.height, slideCount, notice],
-  );
-  useEffect(() => {
-    if (lastSource.current === source) return;
-    lastSource.current = source;
-    if (!live) {
-      state.commit((project) => ({ ...project, sourceText: source }));
-      return;
-    }
-    const timer = setTimeout(() => generate(source), 600);
-    return () => clearTimeout(timer);
-  }, [source, live, generate]);
   const fit = Math.min((area.width - 96) / p.width, (area.height - 84) / p.height, 1),
     scale = Math.max(0.04, fit) * zoom;
   const upload = async (file: File) => {
@@ -264,7 +238,7 @@ export function Editor({
   const convertReel = () => {
     state.commit((project) => resizeProject(project, 1080, 1920));
     setMode('reel');
-    setLive(false);
+
     notice('Converted to 9:16. Adjust the layout and slide timing before exporting.');
   };
   const goHome = async () => {
@@ -276,7 +250,7 @@ export function Editor({
     }
   };
   return (
-    <div className="editor-shell">
+    <div className={`editor-shell ${focusCanvas ? 'canvas-focus' : ''}`}>
       <header className="editor-header">
         <button
           className="icon-button"
@@ -335,6 +309,9 @@ export function Editor({
         </button>
       </header>
       <div className="editor-modebar">
+        <button className="text-button" onClick={() => setFocusCanvas(!focusCanvas)}>
+          {focusCanvas ? 'Show panels' : 'Focus canvas'}
+        </button>
         <div className="mode-switch">
           {(
             [
@@ -348,7 +325,6 @@ export function Editor({
               className={mode === id ? 'active' : ''}
               onClick={() => {
                 setMode(id);
-                if (id !== 'write') setLive(false);
               }}
             >
               <Icon size={16} />
@@ -365,724 +341,685 @@ export function Editor({
           Duplicate page
         </button>
       </div>
-      <div className="editor-body">
-        <aside className="tool-rail">
-          {(
-            [
-              { name: 'Templates', icon: LayoutTemplate },
-              { name: 'Text', icon: Type },
-              { name: 'Shapes', icon: Shapes },
-              { name: 'Backgrounds', icon: Palette },
-              { name: 'Images', icon: Image },
-              { name: 'Uploads', icon: Upload },
-              { name: 'Elements', icon: WandSparkles },
-              { name: 'Brand kit', icon: Layers },
-            ] as const
-          ).map(({ name, icon: Icon }) => (
-            <button
-              key={name}
-              className={tab === name && mode === 'design' ? 'active' : ''}
-              onClick={() => {
-                setTab(name);
-                setMode('design');
-                setLive(false);
-              }}
-            >
-              <Icon size={21} />
-              <span>{name}</span>
-            </button>
-          ))}
-        </aside>
-        <aside className="tool-panel">
-          {mode === 'write' ? (
-            <>
-              <div className="panel-title">
-                <span className="panel-icon">
-                  <PenLine size={19} />
-                </span>
-                <h2>Start with your words</h2>
-              </div>
-              <p className="panel-description">
-                One headline. A few ideas. A design that brings them together.
-              </p>
-              <textarea
-                className="writing-editor"
-                aria-label="Write your content"
-                placeholder={
-                  'Your headline goes here\n\nAdd paragraphs, bullet points, or paste an entire article…'
-                }
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-              />
-              <div className="writing-meta">
-                <span>{source.trim() ? source.trim().split(/\s+/).length : 0} words</span>
-                <button className="text-button" onClick={() => setSource(sample)}>
-                  Try an example
-                </button>
-              </div>
-              <label className="field">
-                Design style
-                <select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                Number of slides
-                <select value={slideCount} onChange={(e) => setSlideCount(Number(e.target.value))}>
-                  {[1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20].map((n) => (
-                    <option key={n} value={n}>
-                      {n === 1 ? 'Single post' : `${n} slides`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button className="primary full-width" onClick={() => generate(source)}>
-                <WandSparkles size={17} />
-                Generate Design
+      <TechnicalTools
+        brands={brands}
+        notice={notice}
+        onVariant={(project) => {
+          state.open(project);
+          location.hash = `project/${project.id}`;
+          setMode('design');
+        }}
+      />
+      {mode === 'write' ? (
+        <Suspense fallback={<div className="empty-state">Opening your writing desk…</div>}>
+          <WritingWorkspace brands={brands} notice={notice} onDesign={() => setMode('design')} />
+        </Suspense>
+      ) : (
+        <div className="editor-body">
+          <aside className="tool-rail">
+            {(
+              [
+                { name: 'Templates', icon: LayoutTemplate },
+                { name: 'Text', icon: Type },
+                { name: 'Shapes', icon: Shapes },
+                { name: 'Backgrounds', icon: Palette },
+                { name: 'Images', icon: Image },
+                { name: 'Uploads', icon: Upload },
+                { name: 'Elements', icon: WandSparkles },
+                { name: 'Brand kit', icon: Layers },
+              ] as const
+            ).map(({ name, icon: Icon }) => (
+              <button
+                key={name}
+                className={tab === name && mode === 'design' ? 'active' : ''}
+                onClick={() => {
+                  setTab(name);
+                  setMode('design');
+                }}
+              >
+                <Icon size={21} />
+                <span>{name}</span>
               </button>
-              <label className="checkbox-row">
-                <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} />
-                Update preview as I write
-              </label>
-              <p className="hint">
-                Generation replaces the current pages. Undo is always available. The first line
-                becomes your headline; paragraphs and bullets become your content.
-              </p>
-            </>
-          ) : mode === 'reel' ? (
-            <>
-              <div className="panel-title">
-                <span className="panel-icon">
-                  <Clapperboard size={19} />
-                </span>
-                <h2>A little motion</h2>
-              </div>
-              <p className="panel-description">
-                Give your ideas time to shine. Each slide becomes a scene.
-              </p>
-              {p.width / p.height !== 9 / 16 && (
-                <button className="primary full-width" onClick={convertReel}>
-                  <Maximize size={17} />
-                  Convert to vertical 9:16
-                </button>
-              )}
-              <label className="field">
-                This slide’s duration
-                <input
-                  aria-label="Slide duration"
-                  type="number"
-                  min={1}
-                  max={30}
-                  step={0.5}
-                  value={page.duration}
-                  onChange={(e) =>
-                    state.updatePage((page) => ({
-                      ...page,
-                      duration: Math.max(1, Math.min(30, Number(e.target.value))),
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                Entrance transition
-                <select
-                  value={page.transition}
-                  onChange={(e) =>
-                    state.updatePage((page) => ({
-                      ...page,
-                      transition: e.target.value as 'fade' | 'slide' | 'none',
-                    }))
-                  }
-                >
-                  <option value="fade">Soft fade</option>
-                  <option value="slide">Slide across</option>
-                  <option value="none">Cut</option>
-                </select>
-              </label>
-              <div className="info-note">
-                <WandSparkles size={17} />
-                <span>
-                  Text fades and rises into each scene. Transitions blend the previous slide into
-                  the next.
-                </span>
-              </div>
-              <label className="upload-box">
-                <Music2 size={24} />
-                <strong>{p.audio ? 'Replace background audio' : 'Add background audio'}</strong>
-                <span>MP3, WAV, OGG · up to 20 MB</span>
-                <input
-                  type="file"
-                  accept="audio/*"
-                  onChange={async (e) => {
-                    const f = e.target.files?.[0];
-                    e.target.value = '';
-                    if (!f) return;
-                    try {
-                      if (!f.type.startsWith('audio/') || f.size > 20 * 1024 * 1024)
-                        throw new Error('Choose an audio file smaller than 20 MB.');
-                      const audio = await readFile(f);
-                      state.commit((p) => ({ ...p, audio }));
-                    } catch (err) {
-                      notice((err as Error).message);
-                    }
-                  }}
-                />
-              </label>
-              {p.audio && (
-                <>
-                  <label className="field">
-                    Audio volume · {Math.round(p.volume * 100)}%
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={p.volume}
-                      onChange={(e) =>
-                        state.commit((p) => ({ ...p, volume: Number(e.target.value) }))
-                      }
-                    />
-                  </label>
-                  <button
-                    className="text-button danger-text"
-                    onClick={() => state.commit((p) => ({ ...p, audio: undefined }))}
-                  >
-                    <Trash2 size={14} />
-                    Remove audio
-                  </button>
-                </>
-              )}
-              <button className="secondary full-width" onClick={() => setPreview(true)}>
-                <Play size={17} />
-                Play {durationOf(p).toFixed(1)}s video
-              </button>
-              <p className="hint">
-                Video records in real time. Keep this tab visible during export. WebM availability
-                depends on your browser.
-              </p>
-            </>
-          ) : (
-            <>
-              <h2>{tab}</h2>
-              <p className="panel-description">
-                {tab === 'Templates'
-                  ? 'A starting point for your next great idea.'
-                  : tab === 'Brand kit'
-                    ? 'Consistency, in one click.'
-                    : 'Make room for your own creative touch.'}
-              </p>
-              {tab === 'Templates' && (
-                <div className="editor-template-grid">
-                  {templates.map((t) => (
-                    <button key={t.id} onClick={() => setTemplateConfirm(t.id)} title={t.name}>
-                      <div style={{ background: t.palette[0], color: t.palette[1] }}>
-                        <span>{t.label}</span>
-                        <strong
-                          style={{ fontFamily: [0, 4].includes(t.layout) ? 'Georgia' : 'Arial' }}
-                        >
-                          {t.title}
-                        </strong>
-                        <i style={{ background: t.palette[2] }} />
-                      </div>
-                      <small>{t.name}</small>
-                    </button>
-                  ))}
+            ))}
+          </aside>
+          <aside className="tool-panel">
+            {mode === 'reel' ? (
+              <>
+                <div className="panel-title">
+                  <span className="panel-icon">
+                    <Clapperboard size={19} />
+                  </span>
+                  <h2>A little motion</h2>
                 </div>
-              )}
-              {tab === 'Text' && (
-                <div className="text-additions">
-                  <button
-                    className="primary full-width"
-                    onClick={() =>
-                      add(
-                        element('text', {
-                          text: 'Your headline here',
-                          fontSize: p.width * 0.08,
-                          fontStyle: 'bold',
-                          width: p.width * 0.8,
-                          height: p.height * 0.25,
-                          x: p.width * 0.1,
-                          y: p.height * 0.2,
-                          role: 'heading',
-                        }),
-                      )
-                    }
-                  >
-                    <Plus size={17} />
-                    Add a heading
-                  </button>
-                  <button
-                    className="text-sample subhead"
-                    onClick={() =>
-                      add(
-                        element('text', {
-                          text: 'A little more to the story',
-                          fontSize: p.width * 0.045,
-                          width: p.width * 0.8,
-                          height: p.height * 0.15,
-                          role: 'body',
-                        }),
-                      )
-                    }
-                  >
-                    Add a subheading
-                  </button>
-                  <button
-                    className="text-sample"
-                    onClick={() =>
-                      add(
-                        element('text', {
-                          text: 'Every idea starts somewhere. Tell your story, one thoughtful word at a time.',
-                          fontSize: p.width * 0.03,
-                          width: p.width * 0.7,
-                          height: p.height * 0.2,
-                          role: 'body',
-                        }),
-                      )
-                    }
-                  >
-                    Add body text
-                  </button>
-                  <div className="panel-divider" />
-                  <button
-                    className="secondary full-width"
-                    onClick={() => setMath({ expression: 'f(x) = \\frac{x^2}{2} + \\sqrt{x}' })}
-                  >
-                    <Sigma size={19} />
-                    Add an equation
-                  </button>
-                  <p className="hint">
-                    Equations use KaTeX and remain editable. Fractions, integrals, matrices, and
-                    more.
-                  </p>
-                </div>
-              )}
-              {(tab === 'Shapes' || tab === 'Elements') && (
-                <>
-                  <div className="shape-grid">
-                    <button
-                      onClick={() =>
-                        add(
-                          element('rect', {
-                            width: p.width * 0.3,
-                            height: p.width * 0.3,
-                            fill: '#ad94d4',
-                            radius: tab === 'Elements' ? 50 : 0,
-                            role: 'accent',
-                          }),
-                        )
-                      }
-                    >
-                      <Square size={40} fill="#ad94d4" strokeWidth={0} />
-                      <span>Rectangle</span>
-                    </button>
-                    <button
-                      onClick={() =>
-                        add(
-                          element('ellipse', {
-                            width: p.width * 0.3,
-                            height: p.width * 0.3,
-                            fill: '#e7bd94',
-                            role: 'accent',
-                          }),
-                        )
-                      }
-                    >
-                      <Circle size={40} fill="#e7bd94" strokeWidth={0} />
-                      <span>Circle</span>
-                    </button>
-                    <button
-                      onClick={() =>
-                        add(element('rect', { width: p.width * 0.6, height: 6, fill: '#6f5a86' }))
-                      }
-                    >
-                      <Minus size={40} />
-                      <span>Line</span>
-                    </button>
-                    <button
-                      onClick={() =>
-                        add(
-                          element('text', {
-                            text: '✦',
-                            fontSize: 200,
-                            width: 240,
-                            height: 260,
-                            fill: '#a08bc2',
-                            role: 'accent',
-                          }),
-                        )
-                      }
-                    >
-                      <span className="shape-star">✦</span>
-                      <span>Sparkle</span>
-                    </button>
-                  </div>
-                  {tab === 'Elements' && (
-                    <button
-                      className="secondary full-width"
-                      onClick={() =>
-                        add(
-                          element('text', {
-                            text: '“',
-                            fontFamily: 'Georgia',
-                            fontSize: 300,
-                            width: 320,
-                            height: 340,
-                            fill: '#b395cf',
-                            role: 'accent',
-                          }),
-                        )
-                      }
-                    >
-                      Add a quotation mark
-                    </button>
-                  )}
-                </>
-              )}
-              {tab === 'Backgrounds' && (
-                <>
-                  <ColorField
-                    label="Page background"
-                    value={page.background}
-                    onChange={(v) => state.updatePage((page) => ({ ...page, background: v }))}
+                <p className="panel-description">
+                  Give your ideas time to shine. Each slide becomes a scene.
+                </p>
+                <label className="field">
+                  Scene notes
+                  <textarea
+                    rows={3}
+                    value={page.notes || ''}
+                    onChange={(e) => state.updatePage((pg) => ({ ...pg, notes: e.target.value }))}
                   />
-                  <div className="swatch-grid">
-                    {[
-                      '#faf7f2',
-                      '#eee9f7',
-                      '#e9eee7',
-                      '#f9ebd9',
-                      '#e9eef3',
-                      '#f1e8e4',
-                      '#282842',
-                      '#163d35',
-                      '#ffffff',
-                      '#f5e3df',
-                      '#e3edf0',
-                      '#f3edda',
-                    ].map((c) => (
-                      <button
-                        key={c}
-                        aria-label={`Set background ${c}`}
-                        style={{ background: c }}
-                        onClick={() => state.updatePage((page) => ({ ...page, background: c }))}
-                      />
-                    ))}
-                  </div>
-                  <button
-                    className="secondary full-width"
-                    onClick={() =>
-                      state.commit((p) => ({
-                        ...p,
-                        pages: p.pages.map((pg) => ({ ...pg, background: page.background })),
+                </label>
+                <label className="field">
+                  On-screen subtitle
+                  <textarea
+                    rows={2}
+                    maxLength={200}
+                    value={page.subtitle || ''}
+                    onChange={(e) =>
+                      state.updatePage((pg) => ({ ...pg, subtitle: e.target.value }))
+                    }
+                  />
+                </label>
+                <button className="secondary full-width" onClick={() => setExporting(true)}>
+                  Export this scene as a cover
+                </button>
+                {p.width / p.height !== 9 / 16 && (
+                  <button className="primary full-width" onClick={convertReel}>
+                    <Maximize size={17} />
+                    Convert to vertical 9:16
+                  </button>
+                )}
+                <label className="field">
+                  This slide’s duration
+                  <input
+                    aria-label="Slide duration"
+                    type="number"
+                    min={1}
+                    max={30}
+                    step={0.5}
+                    value={page.duration}
+                    onChange={(e) =>
+                      state.updatePage((page) => ({
+                        ...page,
+                        duration: Math.max(1, Math.min(30, Number(e.target.value))),
+                      }))
+                    }
+                  />
+                </label>
+                <label className="field">
+                  Entrance transition
+                  <select
+                    value={page.transition}
+                    onChange={(e) =>
+                      state.updatePage((page) => ({
+                        ...page,
+                        transition: e.target.value as 'fade' | 'slide' | 'none',
                       }))
                     }
                   >
-                    Use on every slide
-                  </button>
-                </>
-              )}
-              {(tab === 'Images' || tab === 'Uploads') && (
-                <>
-                  <button
-                    className="upload-box full-width"
-                    onClick={() => uploadRef.current?.click()}
-                  >
-                    <Upload size={29} />
-                    <strong>Bring your own imagery</strong>
-                    <span>Upload PNG, JPG, or WebP</span>
-                    <small>Up to 15 MB · stored with your project</small>
-                  </button>
-                  <p className="hint">
-                    Drag an image onto the canvas to upload it. Your images stay on this device.
-                  </p>
-                  <div className="uploaded-grid">
-                    {p.pages
-                      .flatMap((pg) => pg.elements)
-                      .filter(
-                        (e, i, a) =>
-                          e.kind === 'image' && a.findIndex((other) => other.src === e.src) === i,
-                      )
-                      .map((e) => (
-                        <button
-                          key={e.id}
-                          title="Add another copy"
-                          onClick={() => add({ ...e, id: uid(), x: 100, y: 100 })}
-                        >
-                          <img src={e.src} alt="Uploaded image" />
-                        </button>
-                      ))}
+                    <option value="fade">Soft fade</option>
+                    <option value="slide">Slide across</option>
+                    <option value="none">Cut</option>
+                  </select>
+                </label>
+                <div className="info-note">
+                  <WandSparkles size={17} />
+                  <span>
+                    Text fades and rises into each scene. Transitions blend the previous slide into
+                    the next.
+                  </span>
+                </div>
+                <label className="upload-box">
+                  <Music2 size={24} />
+                  <strong>{p.audio ? 'Replace background audio' : 'Add background audio'}</strong>
+                  <span>MP3, WAV, OGG · up to 20 MB</span>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!f) return;
+                      try {
+                        if (!f.type.startsWith('audio/') || f.size > 20 * 1024 * 1024)
+                          throw new Error('Choose an audio file smaller than 20 MB.');
+                        const audio = await readFile(f);
+                        state.commit((p) => ({ ...p, audio }));
+                      } catch (err) {
+                        notice((err as Error).message);
+                      }
+                    }}
+                  />
+                </label>
+                {p.audio && (
+                  <>
+                    <label className="field">
+                      Audio volume · {Math.round(p.volume * 100)}%
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={p.volume}
+                        onChange={(e) =>
+                          state.commit((p) => ({ ...p, volume: Number(e.target.value) }))
+                        }
+                      />
+                    </label>
+                    <button
+                      className="text-button danger-text"
+                      onClick={() => state.commit((p) => ({ ...p, audio: undefined }))}
+                    >
+                      <Trash2 size={14} />
+                      Remove audio
+                    </button>
+                  </>
+                )}
+                <button className="secondary full-width" onClick={() => setPreview(true)}>
+                  <Play size={17} />
+                  Play {durationOf(p).toFixed(1)}s video
+                </button>
+                <p className="hint">
+                  Video records in real time. Keep this tab visible during export. WebM availability
+                  depends on your browser.
+                </p>
+              </>
+            ) : (
+              <>
+                <h2>{tab}</h2>
+                <p className="panel-description">
+                  {tab === 'Templates'
+                    ? 'A starting point for your next great idea.'
+                    : tab === 'Brand kit'
+                      ? 'Consistency, in one click.'
+                      : 'Make room for your own creative touch.'}
+                </p>
+                {tab === 'Templates' && (
+                  <TemplateGallery compact onChoose={(t) => setTemplateConfirm(t.id)} />
+                )}
+                {tab === 'Text' && (
+                  <div className="text-additions">
+                    <button
+                      className="primary full-width"
+                      onClick={() =>
+                        add(
+                          element('text', {
+                            text: 'Your headline here',
+                            fontSize: p.width * 0.08,
+                            fontStyle: 'bold',
+                            width: p.width * 0.8,
+                            height: p.height * 0.25,
+                            x: p.width * 0.1,
+                            y: p.height * 0.2,
+                            role: 'heading',
+                          }),
+                        )
+                      }
+                    >
+                      <Plus size={17} />
+                      Add a heading
+                    </button>
+                    <button
+                      className="text-sample subhead"
+                      onClick={() =>
+                        add(
+                          element('text', {
+                            text: 'A little more to the story',
+                            fontSize: p.width * 0.045,
+                            width: p.width * 0.8,
+                            height: p.height * 0.15,
+                            role: 'body',
+                          }),
+                        )
+                      }
+                    >
+                      Add a subheading
+                    </button>
+                    <button
+                      className="text-sample"
+                      onClick={() =>
+                        add(
+                          element('text', {
+                            text: 'Every idea starts somewhere. Tell your story, one thoughtful word at a time.',
+                            fontSize: p.width * 0.03,
+                            width: p.width * 0.7,
+                            height: p.height * 0.2,
+                            role: 'body',
+                          }),
+                        )
+                      }
+                    >
+                      Add body text
+                    </button>
+                    <div className="panel-divider" />
+                    <button
+                      className="secondary full-width"
+                      onClick={() => setMath({ expression: 'f(x) = \\frac{x^2}{2} + \\sqrt{x}' })}
+                    >
+                      <Sigma size={19} />
+                      Add an equation
+                    </button>
+                    <p className="hint">
+                      Equations use KaTeX and remain editable. Fractions, integrals, matrices, and
+                      more.
+                    </p>
                   </div>
-                </>
-              )}
-              {tab === 'Brand kit' && (
-                <div className="editor-brands">
-                  {brands.map((b) => (
-                    <div key={b.id}>
-                      <div
-                        className="brand-mini"
-                        style={{ background: b.secondary, color: b.primary }}
-                      >
-                        <strong style={{ fontFamily: b.headingFont }}>{b.name}</strong>
-                        <div>
-                          {[b.primary, b.secondary, b.accent].map((c, i) => (
-                            <i key={i} style={{ background: c }} />
-                          ))}
-                        </div>
-                      </div>
+                )}
+                {(tab === 'Shapes' || tab === 'Elements') && (
+                  <>
+                    <div className="shape-grid">
                       <button
-                        className="secondary full-width"
-                        onClick={() => {
-                          state.commit((p) => applyBrand(p, b));
-                          notice(`${b.name} applied to all slides.`);
-                        }}
+                        onClick={() =>
+                          add(
+                            element('rect', {
+                              width: p.width * 0.3,
+                              height: p.width * 0.3,
+                              fill: '#ad94d4',
+                              radius: tab === 'Elements' ? 50 : 0,
+                              role: 'accent',
+                            }),
+                          )
+                        }
                       >
-                        Apply Brand Kit
+                        <Square size={40} fill="#ad94d4" strokeWidth={0} />
+                        <span>Rectangle</span>
+                      </button>
+                      <button
+                        onClick={() =>
+                          add(
+                            element('ellipse', {
+                              width: p.width * 0.3,
+                              height: p.width * 0.3,
+                              fill: '#e7bd94',
+                              role: 'accent',
+                            }),
+                          )
+                        }
+                      >
+                        <Circle size={40} fill="#e7bd94" strokeWidth={0} />
+                        <span>Circle</span>
+                      </button>
+                      <button
+                        onClick={() =>
+                          add(element('rect', { width: p.width * 0.6, height: 6, fill: '#6f5a86' }))
+                        }
+                      >
+                        <Minus size={40} />
+                        <span>Line</span>
+                      </button>
+                      <button
+                        onClick={() =>
+                          add(
+                            element('text', {
+                              text: '✦',
+                              fontSize: 200,
+                              width: 240,
+                              height: 260,
+                              fill: '#a08bc2',
+                              role: 'accent',
+                            }),
+                          )
+                        }
+                      >
+                        <span className="shape-star">✦</span>
+                        <span>Sparkle</span>
                       </button>
                     </div>
-                  ))}
-                  <p className="hint">
-                    Create and edit brand profiles from Brand kits in your workspace.
-                  </p>
+                    {tab === 'Elements' && (
+                      <button
+                        className="secondary full-width"
+                        onClick={() =>
+                          add(
+                            element('text', {
+                              text: '“',
+                              fontFamily: 'Georgia',
+                              fontSize: 300,
+                              width: 320,
+                              height: 340,
+                              fill: '#b395cf',
+                              role: 'accent',
+                            }),
+                          )
+                        }
+                      >
+                        Add a quotation mark
+                      </button>
+                    )}
+                  </>
+                )}
+                {tab === 'Backgrounds' && (
+                  <>
+                    <ColorField
+                      label="Page background"
+                      value={page.background}
+                      onChange={(v) => state.updatePage((page) => ({ ...page, background: v }))}
+                    />
+                    <div className="swatch-grid">
+                      {[
+                        '#faf7f2',
+                        '#eee9f7',
+                        '#e9eee7',
+                        '#f9ebd9',
+                        '#e9eef3',
+                        '#f1e8e4',
+                        '#282842',
+                        '#163d35',
+                        '#ffffff',
+                        '#f5e3df',
+                        '#e3edf0',
+                        '#f3edda',
+                      ].map((c) => (
+                        <button
+                          key={c}
+                          aria-label={`Set background ${c}`}
+                          style={{ background: c }}
+                          onClick={() => state.updatePage((page) => ({ ...page, background: c }))}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      className="secondary full-width"
+                      onClick={() =>
+                        state.commit((p) => ({
+                          ...p,
+                          pages: p.pages.map((pg) => ({ ...pg, background: page.background })),
+                        }))
+                      }
+                    >
+                      Use on every slide
+                    </button>
+                  </>
+                )}
+                {(tab === 'Images' || tab === 'Uploads') && (
+                  <>
+                    <button
+                      className="upload-box full-width"
+                      onClick={() => uploadRef.current?.click()}
+                    >
+                      <Upload size={29} />
+                      <strong>Bring your own imagery</strong>
+                      <span>Upload PNG, JPG, or WebP</span>
+                      <small>Up to 15 MB · stored with your project</small>
+                    </button>
+                    <p className="hint">
+                      Drag an image onto the canvas to upload it. Your images stay on this device.
+                    </p>
+                    <div className="uploaded-grid">
+                      {p.pages
+                        .flatMap((pg) => pg.elements)
+                        .filter(
+                          (e, i, a) =>
+                            e.kind === 'image' && a.findIndex((other) => other.src === e.src) === i,
+                        )
+                        .map((e) => (
+                          <button
+                            key={e.id}
+                            title="Add another copy"
+                            onClick={() => add({ ...e, id: uid(), x: 100, y: 100 })}
+                          >
+                            <img src={e.src} alt="Uploaded image" />
+                          </button>
+                        ))}
+                    </div>
+                  </>
+                )}
+                {tab === 'Brand kit' && (
+                  <div className="editor-brands">
+                    {brands.map((b) => (
+                      <div key={b.id}>
+                        <div
+                          className="brand-mini"
+                          style={{ background: b.secondary, color: b.primary }}
+                        >
+                          <strong style={{ fontFamily: b.headingFont }}>{b.name}</strong>
+                          <div>
+                            {[b.primary, b.secondary, b.accent].map((c, i) => (
+                              <i key={i} style={{ background: c }} />
+                            ))}
+                          </div>
+                        </div>
+                        <button
+                          className="secondary full-width"
+                          onClick={() => {
+                            state.commit((p) => applyBrand(p, b));
+                            notice(`${b.name} applied to all slides.`);
+                          }}
+                        >
+                          Apply Brand Kit
+                        </button>
+                      </div>
+                    ))}
+                    <p className="hint">
+                      Create and edit brand profiles from Brand kits in your workspace.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+          </aside>
+          <section className="canvas-area">
+            <div
+              ref={workspace}
+              className="canvas-workspace"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer.files[0];
+                if (f) void upload(f);
+              }}
+            >
+              <div className="canvas-wrap">
+                <div className="canvas-page-label">
+                  <span>PAGE {String(state.pageIndex + 1).padStart(2, '0')}</span>
+                  <span>{'Your ideas, beautifully made'}</span>
                 </div>
-              )}
-            </>
-          )}
-        </aside>
-        <section className="canvas-area">
-          <div
-            ref={workspace}
-            className="canvas-workspace"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const f = e.dataTransfer.files[0];
-              if (f) void upload(f);
-            }}
-          >
-            <div className="canvas-wrap">
-              <div className="canvas-page-label">
-                <span>PAGE {String(state.pageIndex + 1).padStart(2, '0')}</span>
+                <Canvas
+                  page={page}
+                  width={p.width}
+                  height={p.height}
+                  zoom={scale}
+                  interactive
+                  onError={notice}
+                />
+              </div>
+            </div>
+            <div className="canvas-status">
+              <span>
+                <span className="status-key">↔</span> Drag to move · corners to resize
+              </span>
+              <div>
+                <button
+                  className="icon-button"
+                  aria-label="Zoom out"
+                  onClick={() => setZoom((z) => Math.max(0.25, z - 0.1))}
+                >
+                  <Minus size={15} />
+                </button>
+                <button className="zoom-label" title="Reset to fit" onClick={() => setZoom(1)}>
+                  {Math.round(scale * 100)}%
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label="Zoom in"
+                  onClick={() => setZoom((z) => Math.min(3, z + 0.1))}
+                >
+                  <Plus size={15} />
+                </button>
+                <button className="icon-button" aria-label="Fit canvas" onClick={() => setZoom(1)}>
+                  <Maximize size={15} />
+                </button>
+              </div>
+            </div>
+            <div className={`page-strip ${mode === 'reel' ? 'timeline' : ''}`}>
+              <div className="page-strip-label">
+                <span>{mode === 'reel' ? 'TIMELINE' : 'YOUR PAGES'}</span>
                 <span>
-                  {mode === 'write' && live ? 'Live preview' : 'Your ideas, beautifully made'}
+                  {mode === 'reel'
+                    ? `${durationOf(p).toFixed(1)}s total`
+                    : `${p.pages.length} pages`}
                 </span>
               </div>
-              <Canvas
-                page={page}
-                width={p.width}
-                height={p.height}
-                zoom={scale}
-                interactive
-                onError={notice}
-              />
-            </div>
-          </div>
-          <div className="canvas-status">
-            <span>
-              <span className="status-key">↔</span> Drag to move · corners to resize
-            </span>
-            <div>
-              <button
-                className="icon-button"
-                aria-label="Zoom out"
-                onClick={() => setZoom((z) => Math.max(0.25, z - 0.1))}
-              >
-                <Minus size={15} />
-              </button>
-              <button className="zoom-label" title="Reset to fit" onClick={() => setZoom(1)}>
-                {Math.round(scale * 100)}%
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Zoom in"
-                onClick={() => setZoom((z) => Math.min(3, z + 0.1))}
-              >
-                <Plus size={15} />
-              </button>
-              <button className="icon-button" aria-label="Fit canvas" onClick={() => setZoom(1)}>
-                <Maximize size={15} />
-              </button>
-            </div>
-          </div>
-          <div className={`page-strip ${mode === 'reel' ? 'timeline' : ''}`}>
-            <div className="page-strip-label">
-              <span>{mode === 'reel' ? 'TIMELINE' : 'YOUR PAGES'}</span>
-              <span>
-                {mode === 'reel' ? `${durationOf(p).toFixed(1)}s total` : `${p.pages.length} pages`}
-              </span>
-            </div>
-            <div className="page-thumbnails">
-              {p.pages.map((pg, i) => (
+              <div className="page-thumbnails">
+                {p.pages.map((pg, i) => (
+                  <button
+                    className={`page-thumbnail ${state.pageIndex === i ? 'active' : ''}`}
+                    key={pg.id}
+                    onClick={() => state.setPage(i)}
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData('text/kreator-page', String(i))}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const raw = e.dataTransfer.getData('text/kreator-page');
+                      if (raw === '') return;
+                      const from = Number(raw);
+                      if (!Number.isInteger(from) || from < 0 || from >= p.pages.length) return;
+                      state.commit((p) => {
+                        const pages = [...p.pages];
+                        pages.splice(i, 0, pages.splice(from, 1)[0]);
+                        return { ...p, pages };
+                      });
+                      state.setPage(i);
+                    }}
+                  >
+                    <div style={{ background: pg.background }}>
+                      <Canvas
+                        page={pg}
+                        width={p.width}
+                        height={p.height}
+                        zoom={Math.min(80 / p.width, 60 / p.height)}
+                      />
+                    </div>
+                    <span>
+                      {String(i + 1).padStart(2, '0')}
+                      {mode === 'reel' && ` · ${pg.duration}s`}
+                    </span>
+                  </button>
+                ))}
                 <button
-                  className={`page-thumbnail ${state.pageIndex === i ? 'active' : ''}`}
-                  key={pg.id}
-                  onClick={() => state.setPage(i)}
-                  draggable
-                  onDragStart={(e) => e.dataTransfer.setData('text/kreator-page', String(i))}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const raw = e.dataTransfer.getData('text/kreator-page');
-                    if (raw === '') return;
-                    const from = Number(raw);
-                    if (!Number.isInteger(from) || from < 0 || from >= p.pages.length) return;
-                    state.commit((p) => {
-                      const pages = [...p.pages];
-                      pages.splice(i, 0, pages.splice(from, 1)[0]);
-                      return { ...p, pages };
-                    });
-                    state.setPage(i);
+                  className="add-page"
+                  onClick={() => {
+                    state.commit((p) => ({ ...p, pages: [...p.pages, blankPage()] }));
+                    state.setPage(p.pages.length);
                   }}
                 >
-                  <div style={{ background: pg.background }}>
-                    <Canvas
-                      page={pg}
-                      width={p.width}
-                      height={p.height}
-                      zoom={Math.min(80 / p.width, 60 / p.height)}
-                    />
-                  </div>
-                  <span>
-                    {String(i + 1).padStart(2, '0')}
-                    {mode === 'reel' && ` · ${pg.duration}s`}
-                  </span>
+                  <Plus size={22} />
+                  <span>Add page</span>
+                </button>
+              </div>
+              <div className="page-actions">
+                <button
+                  className="icon-button"
+                  aria-label="Move page left"
+                  disabled={state.pageIndex === 0}
+                  onClick={() => state.movePage(-1)}
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label="Move page right"
+                  disabled={state.pageIndex === p.pages.length - 1}
+                  onClick={() => state.movePage(1)}
+                >
+                  <ChevronRight size={16} />
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label="Duplicate page"
+                  onClick={state.duplicatePage}
+                >
+                  <Copy size={15} />
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label="Delete page"
+                  disabled={p.pages.length === 1}
+                  onClick={state.removePage}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </div>
+          </section>
+          <aside className="properties-panel">
+            <div className="properties-heading">
+              <h2>{selected ? 'Make it yours' : 'Page settings'}</h2>
+              {selected && (
+                <button
+                  className="icon-button"
+                  aria-label="Deselect element"
+                  onClick={() => state.select(null)}
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            {selected ? (
+              <Properties
+                element={selected}
+                width={p.width}
+                onPatch={(patch) => state.patchElement(selected.id, patch)}
+                onMath={() => setMath({ id: selected.id, expression: selected.text || '' })}
+                onDuplicate={duplicateSelected}
+                onDelete={removeSelected}
+                onLayer={(direction) =>
+                  state.updatePage((page) => {
+                    const elements = [...page.elements],
+                      index = elements.findIndex((e) => e.id === selected.id),
+                      target = Math.max(0, Math.min(elements.length - 1, index + direction));
+                    [elements[index], elements[target]] = [elements[target], elements[index]];
+                    return { ...page, elements };
+                  })
+                }
+              />
+            ) : (
+              <>
+                <ColorField
+                  label="Background"
+                  value={page.background}
+                  onChange={(background) => state.updatePage((page) => ({ ...page, background }))}
+                />
+                <div className="page-info">
+                  <LayoutTemplate size={28} />
+                  <h3>A canvas of possibilities</h3>
+                  <p>Select an element to change its text, color, size, and more.</p>
+                </div>
+                <button
+                  className="secondary full-width"
+                  onClick={() => {
+                    setMode('write');
+                  }}
+                >
+                  Create from your words <ArrowRight size={15} />
+                </button>
+              </>
+            )}
+            <div className="layers-heading">
+              <h3>Layers</h3>
+              <span>{page.elements.length}</span>
+            </div>
+            <div className="layers-list">
+              {[...page.elements].reverse().map((e) => (
+                <button
+                  key={e.id}
+                  className={selected?.id === e.id ? 'active' : ''}
+                  onClick={() => state.select(e.id)}
+                >
+                  {e.kind === 'text' ? (
+                    <Type size={15} />
+                  ) : e.kind === 'image' ? (
+                    <Image size={15} />
+                  ) : e.kind === 'math' ? (
+                    <Sigma size={15} />
+                  ) : (
+                    <Square size={15} />
+                  )}
+                  <span>{e.text?.slice(0, 35) || e.kind}</span>
                 </button>
               ))}
-              <button
-                className="add-page"
-                onClick={() => {
-                  state.commit((p) => ({ ...p, pages: [...p.pages, blankPage()] }));
-                  state.setPage(p.pages.length);
-                }}
-              >
-                <Plus size={22} />
-                <span>Add page</span>
-              </button>
             </div>
-            <div className="page-actions">
-              <button
-                className="icon-button"
-                aria-label="Move page left"
-                disabled={state.pageIndex === 0}
-                onClick={() => state.movePage(-1)}
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Move page right"
-                disabled={state.pageIndex === p.pages.length - 1}
-                onClick={() => state.movePage(1)}
-              >
-                <ChevronRight size={16} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Duplicate page"
-                onClick={state.duplicatePage}
-              >
-                <Copy size={15} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Delete page"
-                disabled={p.pages.length === 1}
-                onClick={state.removePage}
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-          </div>
-        </section>
-        <aside className="properties-panel">
-          <div className="properties-heading">
-            <h2>{selected ? 'Make it yours' : 'Page settings'}</h2>
-            {selected && (
-              <button
-                className="icon-button"
-                aria-label="Deselect element"
-                onClick={() => state.select(null)}
-              >
-                <X size={16} />
-              </button>
-            )}
-          </div>
-          {selected ? (
-            <Properties
-              element={selected}
-              width={p.width}
-              onPatch={(patch) => state.patchElement(selected.id, patch)}
-              onMath={() => setMath({ id: selected.id, expression: selected.text || '' })}
-              onDuplicate={duplicateSelected}
-              onDelete={removeSelected}
-              onLayer={(direction) =>
-                state.updatePage((page) => {
-                  const elements = [...page.elements],
-                    index = elements.findIndex((e) => e.id === selected.id),
-                    target = Math.max(0, Math.min(elements.length - 1, index + direction));
-                  [elements[index], elements[target]] = [elements[target], elements[index]];
-                  return { ...page, elements };
-                })
-              }
-            />
-          ) : (
-            <>
-              <ColorField
-                label="Background"
-                value={page.background}
-                onChange={(background) => state.updatePage((page) => ({ ...page, background }))}
-              />
-              <div className="page-info">
-                <LayoutTemplate size={28} />
-                <h3>A canvas of possibilities</h3>
-                <p>Select an element to change its text, color, size, and more.</p>
-              </div>
-              <button
-                className="secondary full-width"
-                onClick={() => {
-                  setMode('write');
-                  setLive(false);
-                }}
-              >
-                Create from your words <ArrowRight size={15} />
-              </button>
-            </>
-          )}
-          <div className="layers-heading">
-            <h3>Layers</h3>
-            <span>{page.elements.length}</span>
-          </div>
-          <div className="layers-list">
-            {[...page.elements].reverse().map((e) => (
-              <button
-                key={e.id}
-                className={selected?.id === e.id ? 'active' : ''}
-                onClick={() => state.select(e.id)}
-              >
-                {e.kind === 'text' ? (
-                  <Type size={15} />
-                ) : e.kind === 'image' ? (
-                  <Image size={15} />
-                ) : e.kind === 'math' ? (
-                  <Sigma size={15} />
-                ) : (
-                  <Square size={15} />
-                )}
-                <span>{e.text?.slice(0, 35) || e.kind}</span>
-              </button>
-            ))}
-          </div>
-          <p className="shortcut-hint">
-            Ctrl+Z undo · Ctrl+D duplicate
-            <br />
-            Delete remove · Arrow keys nudge
-          </p>
-        </aside>
-      </div>
+            <p className="shortcut-hint">
+              Ctrl+Z undo · Ctrl+D duplicate
+              <br />
+              Delete remove · Arrow keys nudge
+            </p>
+          </aside>
+        </div>
+      )}
       <input
         ref={uploadRef}
         hidden
@@ -1095,7 +1032,7 @@ export function Editor({
         }}
       />
       {exporting && (
-        <ExportDialog
+        <StudioExportDialog
           project={p}
           pageIndex={state.pageIndex}
           onClose={() => setExporting(false)}
@@ -1259,6 +1196,87 @@ function Properties({
           {numeric('letterSpacing', 'Letter spacing', -10, 50)}
         </>
       )}
+      {(e.kind === 'rich' || e.kind === 'code') && (
+        <>
+          <label className="field">
+            Editable source
+            <textarea
+              aria-label="Technical element source"
+              rows={8}
+              className={e.kind === 'code' ? 'code-source' : ''}
+              value={e.text || ''}
+              onChange={(event) => onPatch({ text: event.target.value })}
+            />
+          </label>
+          {numeric('fontSize', 'Font size', 8, 180)}
+          <label className="field">
+            Font family
+            <select
+              value={e.fontFamily || 'Arial'}
+              onChange={(event) => onPatch({ fontFamily: event.target.value })}
+            >
+              {fonts.map((f) => (
+                <option key={f}>{f}</option>
+              ))}
+            </select>
+          </label>
+          <p className="hint">
+            Use Code studio or Rich Markdown above for the full component settings.
+          </p>
+        </>
+      )}
+      {e.kind === 'image' && (
+        <div className="mask-controls">
+          <label className="field">
+            Image mask
+            <select
+              value={e.mask || 'none'}
+              onChange={(event) => onPatch({ mask: event.target.value as 'none' | 'circle' })}
+            >
+              <option value="none">Rectangle</option>
+              <option value="circle">Ellipse / circle</option>
+            </select>
+          </label>
+          {(['x', 'y', 'width', 'height'] as const).map((key) => (
+            <label className="field" key={key}>
+              Crop {key} (%)
+              <input
+                type="number"
+                min={key === 'width' || key === 'height' ? 1 : 0}
+                max={100}
+                value={Math.round(
+                  (e.crop?.[key] ?? (key === 'width' || key === 'height' ? 1 : 0)) * 100,
+                )}
+                onChange={(event) => {
+                  const crop = {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                    ...e.crop,
+                    [key]: Math.max(
+                      key === 'width' || key === 'height' ? 0.01 : 0,
+                      Math.min(
+                        key === 'x' || key === 'y' ? 0.99 : 1,
+                        Number(event.target.value) / 100,
+                      ),
+                    ),
+                  };
+                  crop.width = Math.min(crop.width, 1 - crop.x);
+                  crop.height = Math.min(crop.height, 1 - crop.y);
+                  onPatch({ crop });
+                }}
+              />
+            </label>
+          ))}
+          <button
+            className="text-button"
+            onClick={() => onPatch({ crop: undefined, mask: 'none' })}
+          >
+            Reset crop
+          </button>
+        </div>
+      )}
       {e.kind === 'math' && (
         <button className="secondary full-width" onClick={onMath}>
           <Sigma size={18} />
@@ -1364,123 +1382,6 @@ function MathDialog({
         <Sigma size={18} />
         {busy ? 'Rendering…' : 'Add to design'}
       </button>
-    </Modal>
-  );
-}
-function ExportDialog({
-  project: p,
-  pageIndex,
-  onClose,
-  notice,
-}: {
-  project: Project;
-  pageIndex: number;
-  onClose: () => void;
-  notice: (m: string) => void;
-}) {
-  const [format, setFormat] = useState('png'),
-    [width, setWidth] = useState(p.width),
-    [busy, setBusy] = useState(false),
-    [progress, setProgress] = useState(0);
-  const abort = useRef<AbortController | null>(null);
-  const supported = videoMime();
-  const run = async () => {
-    setBusy(true);
-    setProgress(0);
-    try {
-      if (format === 'png') await exportPNG(p, pageIndex, width);
-      if (format === 'zip') await exportZip(p, width, setProgress);
-      if (format === 'pdf') await exportPDF(p, width, setProgress);
-      if (format === 'json')
-        download(
-          new Blob([JSON.stringify(p)], { type: 'application/json' }),
-          `${safeName(p.name)}.json`,
-        );
-      if (format === 'webm') {
-        abort.current = new AbortController();
-        await exportVideo(p, width, setProgress, abort.current.signal);
-      }
-      notice('Your export is ready. Check your downloads.');
-      onClose();
-    } catch (err) {
-      notice((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      title="Ready to share with the world?"
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <p className="muted">A little creativity, ready to go.</p>
-      <label className="field">
-        File format
-        <select disabled={busy} value={format} onChange={(e) => setFormat(e.target.value)}>
-          <option value="png">PNG · Current page</option>
-          <option value="zip">ZIP · All pages as PNGs</option>
-          <option value="pdf">PDF · All pages</option>
-          {supported && <option value="webm">WebM · Animated video</option>}
-          <option value="json">Kreator project · Editable JSON backup</option>
-        </select>
-      </label>
-      {format !== 'json' && (
-        <label className="field">
-          Output width (px)
-          <input
-            type="number"
-            min={100}
-            max={4096}
-            step={1}
-            value={width}
-            disabled={busy}
-            onChange={(e) => setWidth(Number(e.target.value))}
-          />
-          <small>
-            Output: {width} × {Math.round((width * p.height) / p.width)} px
-          </small>
-        </label>
-      )}
-      {format === 'webm' && (
-        <div className="info-note">
-          <Clapperboard size={18} />
-          <span>
-            {durationOf(p).toFixed(1)} seconds of video. Keep this tab visible while recording.
-            Background audio is included if uploaded.
-          </span>
-        </div>
-      )}
-      {!supported && (
-        <p className="hint">
-          WebM recording is unavailable in this browser. Use Chrome or Edge for video export.
-        </p>
-      )}
-      {busy && (
-        <div className="export-progress">
-          <progress value={progress} max={1} />
-          <span>{progress ? `${Math.round(progress * 100)}%` : 'Preparing your design…'}</span>
-        </div>
-      )}
-      <button
-        className="primary full-width"
-        disabled={busy || width < 100 || width > 4096 || (width * p.height) / p.width > 4096}
-        onClick={() => void run()}
-      >
-        <Download size={18} />
-        {busy ? 'Making it beautiful…' : 'Download'}
-      </button>
-      {(width * p.height) / p.width > 4096 && (
-        <p className="hint">
-          Choose a smaller width. The longest output edge is limited to 4096 pixels.
-        </p>
-      )}
-      {busy && format === 'webm' && (
-        <button className="secondary full-width" onClick={() => abort.current?.abort()}>
-          Cancel recording
-        </button>
-      )}
     </Modal>
   );
 }

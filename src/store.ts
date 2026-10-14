@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Project, Page, DesignElement } from './model';
-import { uid } from './model';
+import { uid, upgradeProject } from './model';
 interface EditorStore {
   project: Project | null;
   pageIndex: number;
@@ -28,7 +28,14 @@ export const useEditor = create<EditorStore>((set, get) => ({
   future: [],
   revision: 0,
   open: (project) =>
-    set({ project, pageIndex: 0, selected: null, past: [], future: [], revision: 0 }),
+    set({
+      project: upgradeProject(project),
+      pageIndex: 0,
+      selected: null,
+      past: [],
+      future: [],
+      revision: 0,
+    }),
   commit: (update) => {
     const { project, past, revision } = get();
     if (project) {

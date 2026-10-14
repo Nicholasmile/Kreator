@@ -11,6 +11,7 @@ import '@fontsource/manrope/latin-700.css';
 import '@fontsource/manrope/latin-800.css';
 import 'katex/dist/katex.min.css';
 import './styles.css';
+import './studio/studio.css';
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: string }> {
   state = { error: '' };
   static getDerivedStateFromError(error: Error) {

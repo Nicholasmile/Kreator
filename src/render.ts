@@ -38,7 +38,17 @@ export function fitTextNode(e: DesignElement): Konva.Text {
 }
 export async function createNode(e: DesignElement): Promise<Konva.Shape> {
   let node: Konva.Shape;
-  if (e.kind === 'text') node = fitTextNode(e);
+  if (e.kind === 'rich' || e.kind === 'code') {
+    const { richImage } = await import('./studio/rich');
+    const image = await loadImage(await richImage(e));
+    node = new Konva.Image({ image, width: e.width, height: e.height });
+  } else if (e.kind === 'chart' && e.chart) {
+    const { chartSVG } = await import('./studio/charts');
+    const image = await loadImage(
+      `data:image/svg+xml;charset=utf-8,${encodeURIComponent(chartSVG(e.chart, e.width, e.height))}`,
+    );
+    node = new Konva.Image({ image, width: e.width, height: e.height });
+  } else if (e.kind === 'text') node = fitTextNode(e);
   else if (e.kind === 'ellipse')
     node = new Konva.Ellipse({
       radiusX: e.width / 2,
@@ -51,7 +61,51 @@ export async function createNode(e: DesignElement): Promise<Konva.Shape> {
     if (!e.src) node = new Konva.Rect({ width: e.width, height: e.height, fill: '#ddd' });
     else {
       const image = await loadImage(e.src);
-      node = new Konva.Image({ image, width: e.width, height: e.height });
+      if (e.mask === 'circle') {
+        const masked = document.createElement('canvas');
+        masked.width = Math.min(2400, Math.round(e.width * 2));
+        masked.height = Math.min(2400, Math.round(e.height * 2));
+        const ctx = masked.getContext('2d')!;
+        ctx.beginPath();
+        ctx.ellipse(
+          masked.width / 2,
+          masked.height / 2,
+          masked.width / 2,
+          masked.height / 2,
+          0,
+          0,
+          Math.PI * 2,
+        );
+        ctx.clip();
+        const c = e.crop || { x: 0, y: 0, width: 1, height: 1 };
+        ctx.drawImage(
+          image,
+          c.x * image.width,
+          c.y * image.height,
+          c.width * image.width,
+          c.height * image.height,
+          0,
+          0,
+          masked.width,
+          masked.height,
+        );
+        node = new Konva.Image({ image: masked, width: e.width, height: e.height });
+      } else
+        node = new Konva.Image({
+          image,
+          width: e.width,
+          height: e.height,
+          ...(e.crop
+            ? {
+                crop: {
+                  x: e.crop.x * image.width,
+                  y: e.crop.y * image.height,
+                  width: e.crop.width * image.width,
+                  height: e.crop.height * image.height,
+                },
+              }
+            : {}),
+        });
     }
   } else
     node = new Konva.Rect({
@@ -71,7 +125,11 @@ export async function createNode(e: DesignElement): Promise<Konva.Shape> {
   return node;
 }
 export async function populateLayer(layer: Konva.Layer, page: Page, width: number, height: number) {
-  const nodes = await Promise.all(page.elements.map(createNode));
+  const nodes = await Promise.all(
+    page.elements
+      .filter((e) => page.brandVisible !== false || e.role !== 'watermark')
+      .map(createNode),
+  );
   layer.add(new Konva.Rect({ width, height, fill: page.background, name: 'page-background' }));
   nodes.forEach((node) => layer.add(node));
 }

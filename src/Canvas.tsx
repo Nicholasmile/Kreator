@@ -58,7 +58,9 @@ export function Canvas({
           layer.add(transformer);
           const attach = (id: string | null) => {
             const target = id ? layer.findOne(`#${id}`) : null;
-            transformer.nodes(target ? [target] : []);
+            transformer.nodes(
+              target && !page.elements.find((e) => e.id === id)?.locked ? [target] : [],
+            );
           };
           attach(useEditor.getState().selected);
           stage.on('click tap', (e) => {
@@ -68,7 +70,7 @@ export function Canvas({
             }
           });
           for (const node of layer.find('.design-element')) {
-            node.draggable(true);
+            node.draggable(!page.elements.find((e) => e.id === node.id())?.locked);
             node.on('click tap', () => {
               useEditor.getState().select(node.id());
               attach(node.id());
@@ -107,22 +109,32 @@ export function Canvas({
             });
             node.on('dragend', () => {
               guides.destroyChildren();
-              useEditor.getState().patchElement(node.id(), { x: node.x(), y: node.y() });
+              const original = page.elements.find((e) => e.id === node.id())!;
+              if (original.groupId) {
+                const dx = node.x() - original.x,
+                  dy = node.y() - original.y;
+                useEditor.getState().updatePage((pg) => ({
+                  ...pg,
+                  elements: pg.elements.map((e) =>
+                    e.groupId === original.groupId && !e.locked
+                      ? { ...e, x: e.x + dx, y: e.y + dy }
+                      : e,
+                  ),
+                }));
+              } else useEditor.getState().patchElement(node.id(), { x: node.x(), y: node.y() });
             });
             node.on('transformend', () => {
               const old = page.elements.find((e) => e.id === node.id())!;
-              useEditor
-                .getState()
-                .patchElement(node.id(), {
-                  x: node.x(),
-                  y: node.y(),
-                  width: Math.max(12, old.width * node.scaleX()),
-                  height: Math.max(12, old.height * node.scaleY()),
-                  rotation: node.rotation(),
-                  fontSize: old.fontSize
-                    ? old.fontSize * Math.min(node.scaleX(), node.scaleY())
-                    : undefined,
-                });
+              useEditor.getState().patchElement(node.id(), {
+                x: node.x(),
+                y: node.y(),
+                width: Math.max(12, old.width * node.scaleX()),
+                height: Math.max(12, old.height * node.scaleY()),
+                rotation: node.rotation(),
+                fontSize: old.fontSize
+                  ? old.fontSize * Math.min(node.scaleX(), node.scaleY())
+                  : undefined,
+              });
             });
           }
         }
@@ -141,12 +153,13 @@ export function Canvas({
     const stage = stageRef.current;
     const tr = stage?.findOne<Konva.Transformer>('.selection');
     const node = selected ? stage?.findOne(`#${selected}`) : null;
-    tr?.nodes(node ? [node] : []);
+    tr?.nodes(node && !page.elements.find((e) => e.id === selected)?.locked ? [node] : []);
   }, [selected, interactive, ready]);
   return (
     <div
       ref={host}
       className="design-canvas"
+      data-render-ready={ready}
       role={interactive ? 'application' : 'img'}
       aria-label={
         interactive

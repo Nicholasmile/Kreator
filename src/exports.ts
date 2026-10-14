@@ -64,7 +64,12 @@ export async function prepareVideo(p: Project, width: number): Promise<VideoFram
   const frames: VideoFrame[] = [];
   for (const page of p.pages) {
     const base = await renderPage(
-      { ...page, elements: page.elements.filter((e) => e.kind !== 'text' && e.kind !== 'math') },
+      {
+        ...page,
+        elements: page.elements.filter(
+          (e) => !['text', 'math', 'rich', 'code', 'chart'].includes(e.kind),
+        ),
+      },
       p.width,
       p.height,
       width,
@@ -73,7 +78,9 @@ export async function prepareVideo(p: Project, width: number): Promise<VideoFram
       {
         ...page,
         background: 'rgba(0,0,0,0)',
-        elements: page.elements.filter((e) => e.kind === 'text' || e.kind === 'math'),
+        elements: page.elements.filter((e) =>
+          ['text', 'math', 'rich', 'code', 'chart'].includes(e.kind),
+        ),
       },
       p.width,
       p.height,
@@ -106,6 +113,26 @@ export function drawVideoFrame(
     const entrance = Math.min(1, Math.max(0, elapsed / 0.5));
     ctx.globalAlpha *= entrance;
     ctx.drawImage(frames[i].text, 0, (1 - entrance) * h * 0.035, w, h);
+    if (p.pages[i].subtitle) {
+      ctx.globalAlpha = alpha;
+      const size = h * 0.026;
+      ctx.font = `600 ${size}px Arial`;
+      const lines: string[] = [];
+      let line = '';
+      for (const word of p.pages[i].subtitle!.split(/\s+/)) {
+        if (ctx.measureText(line + ' ' + word).width > w * 0.78 && line) {
+          lines.push(line);
+          line = word;
+        } else line += (line ? ' ' : '') + word;
+      }
+      if (line) lines.push(line);
+      const y = h * 0.86 - lines.length * size * 0.65;
+      ctx.fillStyle = 'rgba(16,27,52,.9)';
+      ctx.fillRect(w * 0.08, y - size, w * 0.84, lines.length * size * 1.35 + size * 0.9);
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      lines.forEach((line, j) => ctx.fillText(line, w / 2, y + j * size * 1.35, w * 0.78));
+    }
     ctx.restore();
   };
   const transition = p.pages[index].transition,

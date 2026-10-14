@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { TemplateGallery } from './studio/TemplateGallery';
+import { brandStyles } from './studio/types';
+const LibraryWorkspace = lazy(() =>
+  import('./studio/LibraryWorkspace').then((m) => ({ default: m.LibraryWorkspace })),
+);
 import {
   ArrowUpRight,
   ArrowRight,
@@ -24,12 +29,15 @@ import {
   Sparkles,
   HardDrive,
   WandSparkles,
+  PenLine,
+  CalendarDays,
 } from 'lucide-react';
 import { Logo, Modal, ColorField } from './ui';
 import { Canvas } from './Canvas';
 import { Editor } from './Editor';
 import {
   formats,
+  applyBrand,
   newProject,
   presets,
   fonts,
@@ -50,7 +58,7 @@ import {
 } from './storage';
 import { readImage, thumbnail } from './render';
 import { useEditor } from './store';
-type Section = 'Home' | 'My projects' | 'Templates' | 'Brand kits';
+type Section = 'Home' | 'My projects' | 'Templates' | 'Brand kits' | 'Library' | 'Calendar';
 export default function App() {
   const [section, setSection] = useState<Section>('Home'),
     [editing, setEditing] = useState(false),
@@ -116,7 +124,10 @@ export default function App() {
     write = false,
     reel = false,
   ) => {
-    const p = newProject(name, width, height, t ? [templatePage(t, width, height)] : undefined);
+    const p = applyBrand(
+      newProject(name, width, height, t ? [templatePage(t, width, height)] : undefined),
+      brands.find((b) => b.id === 'malik-kolade') || presets[0],
+    );
     try {
       p.thumbnail = await thumbnail(p);
       await saveProject(p);
@@ -157,6 +168,8 @@ export default function App() {
                   { name: 'Home', icon: Home },
                   { name: 'My projects', icon: FolderOpen },
                   { name: 'Templates', icon: LayoutTemplate },
+                  { name: 'Library', icon: FolderOpen },
+                  { name: 'Calendar', icon: CalendarDays },
                   { name: 'Brand kits', icon: Palette },
                 ] as const
               ).map(({ name, icon: Icon }) => (
@@ -174,6 +187,15 @@ export default function App() {
                 </button>
               ))}
             </nav>
+            <button
+              className="nav-item"
+              onClick={() =>
+                void make('Untitled Data Science lesson', 1080, 1350, templates[0], true)
+              }
+            >
+              <PenLine size={19} />
+              Write
+            </button>
             <div className="sidebar-label">YOUR CREATIVE TOOLKIT</div>
             <button className="nav-item" onClick={() => setCreate({ carousel: true })}>
               <Layers size={19} />
@@ -196,10 +218,10 @@ export default function App() {
                 </p>
               </div>
               <div className="profile">
-                <span className="avatar">Y</span>
+                <span className="avatar">MK</span>
                 <div>
-                  <strong>Your workspace</strong>
-                  <small>Personal · Free forever</small>
+                  <strong>Malik Kolade</strong>
+                  <small>Data Science · Personal studio</small>
                 </div>
                 <span className="online-dot" />
               </div>
@@ -215,365 +237,319 @@ export default function App() {
               </span>
             </header>
             <div className="dashboard-content">
-              <div className="page-heading">
-                <div>
-                  <p className="eyebrow">A GOOD DAY TO MAKE SOMETHING</p>
-                  <h1>
-                    {section === 'Home'
-                      ? 'Big ideas start here.'
-                      : section === 'My projects'
-                        ? 'Made by you.'
-                        : section === 'Templates'
-                          ? 'A head start for every idea.'
-                          : 'Make it unmistakably yours.'}
-                  </h1>
-                  <p className="subheading">
-                    {section === 'Home'
-                      ? 'Turn what you know into something worth sharing.'
-                      : section === 'My projects'
-                        ? 'Your ideas, experiments, and next great thing — all in one place.'
-                        : section === 'Templates'
-                          ? 'Thoughtfully designed. Completely editable. Ready for your words.'
-                          : 'Your colors, your type, your signature. One click away.'}
-                  </p>
-                </div>
-                {section === 'My projects' && (
-                  <button className="secondary" onClick={() => importRef.current?.click()}>
-                    <Upload size={16} />
-                    Import project
-                  </button>
-                )}
-                {section === 'Brand kits' && (
-                  <button
-                    className="primary"
-                    onClick={() =>
-                      setBrandEdit({
-                        ...presets[0],
-                        id: uid(),
-                        name: 'My brand',
-                        watermark: '',
-                        handle: '',
-                      })
-                    }
-                  >
-                    <Plus size={17} />
-                    New brand kit
-                  </button>
-                )}
-              </div>
-              {section === 'Home' && (
+              {section === 'Library' || section === 'Calendar' ? (
+                <Suspense
+                  fallback={<div className="empty-state">Opening your content library…</div>}
+                >
+                  <LibraryWorkspace
+                    key={section}
+                    calendar={section === 'Calendar'}
+                    brands={brands}
+                    notice={notice}
+                    onOpen={open}
+                  />
+                </Suspense>
+              ) : (
                 <>
-                  <section className="hero">
-                    <div className="hero-copy">
-                      <span className="hero-tag">
-                        <Sparkles size={13} /> FROM A THOUGHT TO A FINISHED DESIGN
-                      </span>
-                      <h2>
-                        You bring the words.
-                        <br />
-                        We’ll bring the <em>wow.</em>
-                      </h2>
-                      <p>
-                        A post, a carousel, your next big announcement.
-                        <br />
-                        Make it beautifully yours in just a few clicks.
-                      </p>
-                      <button className="dark-button" onClick={() => setCreate({ carousel: true })}>
-                        Start with your words <ArrowRight size={17} />
-                      </button>
-                      <span className="hero-footnote">
-                        No design experience needed. Just an idea.
-                      </span>
-                    </div>
-                    <div className="hero-art" aria-hidden="true">
-                      <span className="art-spark spark-one">✳</span>
-                      <span className="art-spark spark-two">✧</span>
-                      <div className="hero-card card-back">
-                        <span>THE DATA NOTEBOOK</span>
-                        <strong>
-                          Let your data
-                          <br />
-                          tell the story.
-                        </strong>
-                        <div className="mini-chart">
-                          <i />
-                          <i />
-                          <i />
-                          <i />
-                        </div>
-                        <small>FIND THE MEANING IN THE NUMBERS.</small>
-                      </div>
-                      <div className="hero-card card-front">
-                        <span>A LITTLE REMINDER</span>
-                        <div className="sun-mark">✳</div>
-                        <strong>
-                          Good things
-                          <br />
-                          start with
-                          <br />
-                          <em>one idea.</em>
-                        </strong>
-                        <small>MAKE SOMETHING THAT MATTERS. ↗</small>
-                      </div>
-                      <div className="floating-pill">
-                        <span>✦</span> A little inspiration, a lot of you.
-                      </div>
-                    </div>
-                  </section>
-                  <section className="formats-section">
-                    <div className="section-heading">
-                      <h2>What are we creating?</h2>
-                      <button className="text-button" onClick={() => setCreate({})}>
-                        Custom size <Plus size={15} />
-                      </button>
-                    </div>
-                    <div className="format-grid">
-                      {formats.map((format, i) => {
-                        const Icon = [Instagram, PanelTop, Smartphone, Linkedin, PanelTop, Youtube][
-                          i
-                        ];
-                        return (
-                          <button
-                            className="format-card"
-                            key={format.name}
-                            onClick={() =>
-                              void make(format.name, format.width, format.height, templates[i])
-                            }
-                          >
-                            <span className={`format-icon format-${i}`}>
-                              <Icon size={24} />
-                            </span>
-                            <strong>{format.name}</strong>
-                            <small>
-                              {format.width} × {format.height} px
-                            </small>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </section>
-                </>
-              )}
-              {(section === 'Home' || section === 'My projects') && (
-                <section className="projects-section">
-                  <div className="section-heading">
-                    <h2>
-                      {section === 'Home' ? 'Pick up where you left off' : 'Your projects'}{' '}
-                      <span className="count-pill">{projects.length}</span>
-                    </h2>
-                    {section === 'Home' ? (
-                      <button className="text-button" onClick={() => setSection('My projects')}>
-                        View all projects <ArrowRight size={15} />
-                      </button>
-                    ) : (
-                      <label className="search-box">
-                        <Search size={17} />
-                        <input
-                          aria-label="Search projects"
-                          placeholder="Find a project…"
-                          value={query}
-                          onChange={(e) => setQuery(e.target.value)}
-                        />
-                      </label>
-                    )}
-                  </div>
-                  {loading ? (
-                    <div className="empty-state">Opening your workspace…</div>
-                  ) : filtered.length ? (
-                    <div className="project-grid">
-                      {filtered.slice(0, section === 'Home' ? 4 : undefined).map((p) => (
-                        <div className="project-card" key={p.id}>
-                          <button className="project-preview" onClick={() => open(p)}>
-                            {p.thumbnail ? (
-                              <img src={p.thumbnail} alt={p.name} />
-                            ) : (
-                              <Canvas
-                                page={p.pages[0]}
-                                width={p.width}
-                                height={p.height}
-                                zoom={180 / p.width}
-                              />
-                            )}
-                            <span className="page-badge">
-                              <Layers size={12} />
-                              {p.pages.length} {p.pages.length === 1 ? 'page' : 'pages'}
-                            </span>
-                          </button>
-                          <div className="project-details">
-                            <button onClick={() => open(p)}>
-                              <strong>{p.name}</strong>
-                              <small>
-                                {p.width} × {p.height} ·{' '}
-                                {new Date(p.updatedAt).toLocaleDateString(undefined, {
-                                  month: 'short',
-                                  day: 'numeric',
-                                })}
-                              </small>
-                            </button>
-                            <details className="project-menu">
-                              <summary aria-label={`Options for ${p.name}`}>
-                                <MoreHorizontal size={19} />
-                              </summary>
-                              <div>
-                                <button onClick={() => void duplicate(p)}>
-                                  <Copy size={14} />
-                                  Duplicate
-                                </button>
-                                <button onClick={() => setDeleting(p)}>
-                                  <Trash2 size={14} />
-                                  Delete
-                                </button>
-                              </div>
-                            </details>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="empty-projects">
-                      <span className="empty-illustration">
-                        <FolderOpen size={28} />
-                      </span>
-                      <div>
-                        <h3>
-                          {query ? 'No matching projects' : 'Your next great idea belongs here.'}
-                        </h3>
-                        <p>
-                          {query
-                            ? 'Try another name.'
-                            : 'Create your first design. We’ll keep it safe on this device.'}
-                        </p>
-                      </div>
-                      <button className="secondary" onClick={() => setCreate({})}>
-                        <Plus size={16} />
-                        Create a design
-                      </button>
-                    </div>
-                  )}
-                </section>
-              )}
-              {(section === 'Home' || section === 'Templates') && (
-                <section className="templates-section">
-                  <div className="section-heading">
+                  <div className="page-heading">
                     <div>
-                      <h2>A little inspiration goes a long way</h2>
-                      <p>Start with a template. Make it your own.</p>
+                      <p className="eyebrow">A GOOD DAY TO MAKE SOMETHING</p>
+                      <h1>
+                        {section === 'Home'
+                          ? 'Big ideas start here.'
+                          : section === 'My projects'
+                            ? 'Made by you.'
+                            : section === 'Templates'
+                              ? 'A head start for every idea.'
+                              : 'Make it unmistakably yours.'}
+                      </h1>
+                      <p className="subheading">
+                        {section === 'Home'
+                          ? 'Turn what you know into something worth sharing.'
+                          : section === 'My projects'
+                            ? 'Your ideas, experiments, and next great thing — all in one place.'
+                            : section === 'Templates'
+                              ? 'Thoughtfully designed. Completely editable. Ready for your words.'
+                              : 'Your colors, your type, your signature. One click away.'}
+                      </p>
                     </div>
-                    {section === 'Home' && (
-                      <button className="text-button" onClick={() => setSection('Templates')}>
-                        Explore templates <ArrowRight size={15} />
+                    {section === 'My projects' && (
+                      <button className="secondary" onClick={() => importRef.current?.click()}>
+                        <Upload size={16} />
+                        Import project
                       </button>
                     )}
-                    {section === 'Templates' && (
-                      <label className="search-box">
-                        <Search size={17} />
-                        <input
-                          aria-label="Search templates"
-                          placeholder="Search templates…"
-                          value={query}
-                          onChange={(e) => setQuery(e.target.value)}
-                        />
-                      </label>
-                    )}
-                  </div>
-                  <div className="filter-row">
-                    {[
-                      'All templates',
-                      'Education',
-                      'Data Science',
-                      'Mathematics',
-                      'Research',
-                      'Quotes',
-                      'Business',
-                      'Carousel',
-                      ...(section === 'Templates'
-                        ? ['Tutorials', 'Myth vs Fact', 'Comparison', 'Product', 'LinkedIn']
-                        : []),
-                    ].map((c) => (
+                    {section === 'Brand kits' && (
                       <button
-                        className={category === c ? 'active' : ''}
-                        key={c}
-                        onClick={() => setCategory(c)}
+                        className="primary"
+                        onClick={() =>
+                          setBrandEdit({
+                            ...presets[0],
+                            id: uid(),
+                            name: 'My brand',
+                            watermark: '',
+                            handle: '',
+                          })
+                        }
                       >
-                        {c}
+                        <Plus size={17} />
+                        New brand kit
                       </button>
-                    ))}
+                    )}
                   </div>
-                  <div className="template-grid">
-                    {templates
-                      .filter(
-                        (t) =>
-                          (category === 'All templates' || t.category === category) &&
-                          `${t.name} ${t.category} ${t.title}`
-                            .toLowerCase()
-                            .includes(query.toLowerCase()),
-                      )
-                      .slice(0, section === 'Home' ? 4 : undefined)
-                      .map((t) => (
-                        <button
-                          className="template-card"
-                          key={t.id}
-                          onClick={() => setCreate({ template: t })}
-                        >
-                          <div className="template-preview">
-                            <TemplateThumb template={t} />
-                            <span className="template-use">
-                              Make it yours <ArrowUpRight size={16} />
-                            </span>
+                  {section === 'Home' && (
+                    <>
+                      <section className="hero">
+                        <div className="hero-copy">
+                          <span className="hero-tag">
+                            <Sparkles size={13} /> FROM A THOUGHT TO A FINISHED DESIGN
+                          </span>
+                          <h2>
+                            You bring the words.
+                            <br />
+                            We’ll bring the <em>wow.</em>
+                          </h2>
+                          <p>
+                            A post, a carousel, your next big announcement.
+                            <br />
+                            Make it beautifully yours in just a few clicks.
+                          </p>
+                          <button
+                            className="dark-button"
+                            onClick={() => setCreate({ carousel: true })}
+                          >
+                            Start with your words <ArrowRight size={17} />
+                          </button>
+                          <span className="hero-footnote">
+                            No design experience needed. Just an idea.
+                          </span>
+                        </div>
+                        <div className="hero-art" aria-hidden="true">
+                          <span className="art-spark spark-one">✳</span>
+                          <span className="art-spark spark-two">✧</span>
+                          <div className="hero-card card-back">
+                            <span>THE DATA NOTEBOOK</span>
+                            <strong>
+                              Let your data
+                              <br />
+                              tell the story.
+                            </strong>
+                            <div className="mini-chart">
+                              <i />
+                              <i />
+                              <i />
+                              <i />
+                            </div>
+                            <small>FIND THE MEANING IN THE NUMBERS.</small>
                           </div>
-                          <strong>{t.name}</strong>
-                          <small>
-                            {t.category} <span>·</span> Free template
-                          </small>
-                        </button>
-                      ))}
-                  </div>
-                </section>
-              )}
-              {section === 'Brand kits' && (
-                <div className="brand-grid">
-                  {brands.map((b) => (
-                    <button
-                      className="brand-card"
-                      key={b.id}
-                      onClick={() => setBrandEdit(structuredClone(b))}
-                    >
-                      <div
-                        className="brand-sample"
-                        style={{
-                          background: b.secondary,
-                          color: b.primary,
-                          fontFamily: b.headingFont,
-                        }}
-                      >
-                        {b.logo ? (
-                          <img src={b.logo} alt="" />
+                          <div className="hero-card card-front">
+                            <span>A LITTLE REMINDER</span>
+                            <div className="sun-mark">✳</div>
+                            <strong>
+                              Good things
+                              <br />
+                              start with
+                              <br />
+                              <em>one idea.</em>
+                            </strong>
+                            <small>MAKE SOMETHING THAT MATTERS. ↗</small>
+                          </div>
+                          <div className="floating-pill">
+                            <span>✦</span> A little inspiration, a lot of you.
+                          </div>
+                        </div>
+                      </section>
+                      <section className="formats-section">
+                        <div className="section-heading">
+                          <h2>What are we creating?</h2>
+                          <button className="text-button" onClick={() => setCreate({})}>
+                            Custom size <Plus size={15} />
+                          </button>
+                        </div>
+                        <div className="format-grid">
+                          {formats.map((format, i) => {
+                            const Icon = [
+                              Instagram,
+                              PanelTop,
+                              Smartphone,
+                              Linkedin,
+                              PanelTop,
+                              Youtube,
+                            ][i];
+                            return (
+                              <button
+                                className="format-card"
+                                key={format.name}
+                                onClick={() =>
+                                  void make(format.name, format.width, format.height, templates[i])
+                                }
+                              >
+                                <span className={`format-icon format-${i}`}>
+                                  <Icon size={24} />
+                                </span>
+                                <strong>{format.name}</strong>
+                                <small>
+                                  {format.width} × {format.height} px
+                                </small>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    </>
+                  )}
+                  {(section === 'Home' || section === 'My projects') && (
+                    <section className="projects-section">
+                      <div className="section-heading">
+                        <h2>
+                          {section === 'Home' ? 'Pick up where you left off' : 'Your projects'}{' '}
+                          <span className="count-pill">{projects.length}</span>
+                        </h2>
+                        {section === 'Home' ? (
+                          <button className="text-button" onClick={() => setSection('My projects')}>
+                            View all projects <ArrowRight size={15} />
+                          </button>
                         ) : (
-                          <span className="brand-letter">{b.name[0]}</span>
+                          <label className="search-box">
+                            <Search size={17} />
+                            <input
+                              aria-label="Search projects"
+                              placeholder="Find a project…"
+                              value={query}
+                              onChange={(e) => setQuery(e.target.value)}
+                            />
+                          </label>
                         )}
-                        <strong>{b.name}</strong>
-                        <small>{b.watermark || 'YOUR BRAND, BEAUTIFULLY CONSISTENT.'}</small>
-                        <div>
-                          {[b.primary, b.secondary, b.accent].map((color, i) => (
-                            <i key={i} style={{ background: color }} />
+                      </div>
+                      {loading ? (
+                        <div className="empty-state">Opening your workspace…</div>
+                      ) : filtered.length ? (
+                        <div className="project-grid">
+                          {filtered.slice(0, section === 'Home' ? 4 : undefined).map((p) => (
+                            <div className="project-card" key={p.id}>
+                              <button className="project-preview" onClick={() => open(p)}>
+                                {p.thumbnail ? (
+                                  <img src={p.thumbnail} alt={p.name} />
+                                ) : (
+                                  <Canvas
+                                    page={p.pages[0]}
+                                    width={p.width}
+                                    height={p.height}
+                                    zoom={180 / p.width}
+                                  />
+                                )}
+                                <span className="page-badge">
+                                  <Layers size={12} />
+                                  {p.pages.length} {p.pages.length === 1 ? 'page' : 'pages'}
+                                </span>
+                              </button>
+                              <div className="project-details">
+                                <button onClick={() => open(p)}>
+                                  <strong>{p.name}</strong>
+                                  <small>
+                                    {p.width} × {p.height} ·{' '}
+                                    {new Date(p.updatedAt).toLocaleDateString(undefined, {
+                                      month: 'short',
+                                      day: 'numeric',
+                                    })}
+                                  </small>
+                                </button>
+                                <details className="project-menu">
+                                  <summary aria-label={`Options for ${p.name}`}>
+                                    <MoreHorizontal size={19} />
+                                  </summary>
+                                  <div>
+                                    <button onClick={() => void duplicate(p)}>
+                                      <Copy size={14} />
+                                      Duplicate
+                                    </button>
+                                    <button onClick={() => setDeleting(p)}>
+                                      <Trash2 size={14} />
+                                      Delete
+                                    </button>
+                                  </div>
+                                </details>
+                              </div>
+                            </div>
                           ))}
                         </div>
-                      </div>
-                      <div className="brand-card-footer">
-                        <strong>{b.name}</strong>
-                        <span>
-                          Edit brand <ArrowUpRight size={14} />
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                      ) : (
+                        <div className="empty-projects">
+                          <span className="empty-illustration">
+                            <FolderOpen size={28} />
+                          </span>
+                          <div>
+                            <h3>
+                              {query
+                                ? 'No matching projects'
+                                : 'Your next great idea belongs here.'}
+                            </h3>
+                            <p>
+                              {query
+                                ? 'Try another name.'
+                                : 'Create your first design. We’ll keep it safe on this device.'}
+                            </p>
+                          </div>
+                          <button className="secondary" onClick={() => setCreate({})}>
+                            <Plus size={16} />
+                            Create a design
+                          </button>
+                        </div>
+                      )}
+                    </section>
+                  )}
+                  {(section === 'Home' || section === 'Templates') && (
+                    <TemplateGallery
+                      limit={section === 'Home' ? 4 : undefined}
+                      onChoose={(t) => setCreate({ template: t })}
+                    />
+                  )}
+                  {section === 'Brand kits' && (
+                    <div className="brand-grid">
+                      {brands.map((b) => (
+                        <button
+                          className="brand-card"
+                          key={b.id}
+                          onClick={() => setBrandEdit(structuredClone(b))}
+                        >
+                          <div
+                            className="brand-sample"
+                            style={{
+                              background: b.secondary,
+                              color: b.primary,
+                              fontFamily: b.headingFont,
+                            }}
+                          >
+                            {b.logo ? (
+                              <img src={b.logo} alt="" />
+                            ) : (
+                              <span className="brand-letter">{b.name[0]}</span>
+                            )}
+                            <strong>{b.name}</strong>
+                            <small>{b.watermark || 'YOUR BRAND, BEAUTIFULLY CONSISTENT.'}</small>
+                            <div>
+                              {[b.primary, b.secondary, b.accent].map((color, i) => (
+                                <i key={i} style={{ background: color }} />
+                              ))}
+                            </div>
+                          </div>
+                          <div className="brand-card-footer">
+                            <strong>{b.name}</strong>
+                            <span>
+                              Edit brand <ArrowUpRight size={14} />
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <footer className="dashboard-footer">
+                    <Logo small />
+                    <span>A space for your ideas. Made to be yours.</span>
+                    <span>Saved locally · Back up your projects as JSON</span>
+                  </footer>
+                </>
               )}
-              <footer className="dashboard-footer">
-                <Logo small />
-                <span>A space for your ideas. Made to be yours.</span>
-                <span>Saved locally · Back up your projects as JSON</span>
-              </footer>
             </div>
           </main>
           <input
@@ -837,6 +813,82 @@ function BrandDialog({
         Social handle
         <input value={value.handle} onChange={(e) => patch({ handle: e.target.value })} />
       </label>
+      <label className="field">
+        Professional positioning
+        <input
+          value={value.positioning || ''}
+          onChange={(e) => patch({ positioning: e.target.value })}
+        />
+      </label>
+      <label className="field">
+        Signature
+        <input
+          value={value.signature || ''}
+          onChange={(e) => patch({ signature: e.target.value })}
+        />
+      </label>
+      <div className="field-row">
+        <label className="field">
+          Visual style
+          <select
+            value={value.style || 'Clean Light'}
+            onChange={(e) => patch({ style: e.target.value as Brand['style'] })}
+          >
+            {brandStyles.map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Footer alignment
+          <select
+            value={value.footerPlacement || 'left'}
+            onChange={(e) => patch({ footerPlacement: e.target.value as Brand['footerPlacement'] })}
+          >
+            <option>left</option>
+            <option>center</option>
+            <option>right</option>
+          </select>
+        </label>
+      </div>
+      <label className="field">
+        Default writing tone
+        <input value={value.tone || ''} onChange={(e) => patch({ tone: e.target.value })} />
+      </label>
+      <label className="field">
+        Default caption scaffold
+        <textarea
+          rows={3}
+          value={value.defaultCaption || ''}
+          onChange={(e) => patch({ defaultCaption: e.target.value })}
+        />
+      </label>
+      <label className="upload-box">
+        {value.profilePhoto ? (
+          <img src={value.profilePhoto} alt="Profile photograph" />
+        ) : (
+          <Upload size={22} />
+        )}
+        <span>Profile photograph</span>
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (file)
+              try {
+                patch({ profilePhoto: await readImage(file) });
+              } catch (err) {
+                notice((err as Error).message);
+              }
+          }}
+        />
+      </label>
+      {value.profilePhoto && (
+        <button className="text-button" onClick={() => patch({ profilePhoto: undefined })}>
+          Remove profile photograph
+        </button>
+      )}
       <label className="upload-box">
         {value.logo ? <img src={value.logo} alt="Brand logo" /> : <Upload size={22} />}
         <span>Upload logo · PNG, JPG, WebP</span>

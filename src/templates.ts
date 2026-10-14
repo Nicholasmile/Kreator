@@ -1,4 +1,5 @@
 import { element, uid, type Page } from './model';
+import { studioTemplates, studioTemplatePage } from './studio/templateFamilies';
 export interface Template {
   id: string;
   name: string;
@@ -8,6 +9,10 @@ export interface Template {
   label: string;
   palette: [string, string, string];
   layout: number;
+  platform?: string;
+  tags?: string[];
+  description?: string;
+  format?: string;
 }
 const entries: [string, string, string, string, string, [string, string, string], number][] = [
   [
@@ -227,16 +232,19 @@ const entries: [string, string, string, string, string, [string, string, string]
     0,
   ],
 ];
-export const templates: Template[] = entries.map((e, i) => ({
-  id: `template-${i}`,
-  name: e[0],
-  category: e[1],
-  title: e[2],
-  body: e[3],
-  label: e[4],
-  palette: e[5],
-  layout: e[6],
-}));
+export const templates: Template[] = [
+  ...entries.map((e, i) => ({
+    id: `template-${i}`,
+    name: e[0],
+    category: e[1],
+    title: e[2],
+    body: e[3],
+    label: e[4],
+    palette: e[5],
+    layout: e[6],
+  })),
+  ...studioTemplates,
+];
 export function templatePage(
   t: Template,
   width = 1080,
@@ -245,6 +253,7 @@ export function templatePage(
   body = t.body,
   number?: string,
 ): Page {
+  if (t.layout >= 5) return studioTemplatePage(t, width, height, title, body);
   const [bg, ink, accent] = t.palette,
     w = width,
     h = height,
