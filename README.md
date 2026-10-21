@@ -156,6 +156,8 @@ The audit and compatibility decisions are in [UPGRADE-PLAN.md](UPGRADE-PLAN.md).
 
 ## Validation
 
+Template gallery thumbnails are pre-rendered PNG assets, loaded lazily to avoid code/math rasterization during scrolling. After changing built-in template content or layouts, run `node scripts/generate-template-previews.mjs` with Google Chrome installed, and commit the updated files in `src/assets/template-previews/`. The script uses the same renderer as the editor and starts/stops its own local Vite server. `tests/scrolling.spec.ts` checks panel stability and availability of all 80 previews.
+
 ```powershell
 npm test
 npm run build

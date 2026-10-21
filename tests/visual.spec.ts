@@ -28,9 +28,10 @@ test('original and Data Science template compositions retain their appearance', 
   const gallery = page.locator('.template-gallery-v2');
   const search = page.getByLabel('Search templates');
   await search.fill('Python');
-  await expect(page.locator('.gallery-thumbnail canvas').first()).toBeVisible();
-  for (const canvas of await page.locator('.gallery-thumbnail .design-canvas').all())
-    await expect(canvas).toHaveAttribute('data-render-ready', 'true');
+  for (const card of await page.locator('.gallery-thumbnail').all()) {
+    await card.scrollIntoViewIfNeeded();
+    await expect(card.locator('img')).toBeVisible();
+  }
   await expect(gallery).toHaveScreenshot('python-template-gallery.png', {
     maxDiffPixelRatio: 0.005,
   });

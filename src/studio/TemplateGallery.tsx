@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Star, Search } from 'lucide-react';
-import { templates, templatePage, type Template } from '../templates';
-import { Canvas } from '../Canvas';
+import { templates, type Template } from '../templates';
 import { getSetting, putSetting } from '../storage';
 export function TemplateGallery({
   onChoose,
@@ -22,6 +21,7 @@ export function TemplateGallery({
     void getSetting<string[]>('favoriteTemplates', []).then(setFavorites);
     void getSetting<string[]>('recentTemplates', []).then(setRecent);
   }, []);
+
   const choose = (t: Template) => {
     const ids = [t.id, ...recent.filter((id) => id !== t.id)].slice(0, 20);
     setRecent(ids);
@@ -120,32 +120,25 @@ export function TemplateGallery({
     </section>
   );
 }
+// Generated from the shared renderer; no Konva or code/math rasterization on scroll.
+const previews = import.meta.glob<string>('../assets/template-previews/*.png', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+});
 function GalleryThumbnail({ template: t }: { template: Template }) {
-  const ref = useRef<HTMLDivElement>(null),
-    [visible, setVisible] = useState(false);
   const height = t.platform === 'WhatsApp' ? 1920 : t.layout >= 5 ? 1350 : 1080;
-  const [page] = useState(() => templatePage(t, 1080, height));
-  useEffect(() => {
-    if (!ref.current) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '100px' },
-    );
-    observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, []);
   return (
     <div
-      ref={ref}
       className="template-preview gallery-thumbnail"
-      style={{ aspectRatio: `1080/${height}`, background: t.palette[0] }}
+      style={{ aspectRatio: '1080/' + height, background: t.palette[0] }}
     >
-      {visible && <Canvas page={page} width={1080} height={height} zoom={0.25} />}
+      <img
+        src={previews['../assets/template-previews/' + t.id + '.png']}
+        alt=""
+        loading="lazy"
+        decoding="async"
+      />
     </div>
   );
 }

@@ -1,5 +1,15 @@
 # Kreator Studio 2.0 validation
 
+## Template-panel scrolling fix — 21 October 2026
+
+The original gallery accumulated live Konva canvases as templates entered view (58 canvases after seven scroll steps in the reproduction). Replacing them with runtime-generated images removed that accumulation, but a CPU-throttled check still exposed pauses during code/math rasterization. The final implementation uses 80 pre-rendered, lazily loaded PNGs (approximately 1.14 MB combined), removing template rasterization from the scrolling path entirely. Editable templates still use the shared design renderer when applied.
+
+Verification: all four targeted Playwright checks passed: panel scroll/geometry stability, loadable previews for all 80 templates, technical-slide visual comparisons, and gallery visual comparison against the existing baseline. `npm.cmd run build` passed. Existing bundle-size warnings remain. Regenerate preview assets after template changes using `node scripts/generate-template-previews.mjs`.
+
+A supplementary Chrome development-server run with 4× CPU throttling completed scrolling and search with zero live gallery canvases. It still recorded irregular frame timing (233 ms p95, 2,483 ms maximum across the whole automation sequence), so this is not evidence of consistently smooth frame rates on all machines. The verified improvement is removal of gallery canvas accumulation and runtime code/math rendering; further profiling may be needed if stuttering persists on the user's device.
+
+## Original upgrade verification
+
 Verified on 14 October 2026, Windows with installed Google Chrome. The local test server used port 5188; browser tests used isolated contexts and did not modify the user's saved workspace on port 5186.
 
 | Command | Result |
